@@ -1,0 +1,17 @@
+#!/bin/sh
+# prerm: runs before files are removed.
+# Stop nginx, remove the load_module we injected into the template, and the
+# symlinks we created.
+/etc/init.d/nginx stop 2>/dev/null || killall nginx 2>/dev/null || true
+
+TPL=/etc/nginx/uci.conf.template
+if [ -f "$TPL" ]; then
+    # Delete any line containing the distinctive module path, regardless of
+    # leading whitespace / a stray prefix (busybox sed renders \t as 't').
+    sed -i "/load_module \/usr\/lib\/nginx\/modules\/ngx_http_ubus_module.so;/d" "$TPL"
+fi
+
+rm -f /lib/libubus.so /usr/lib/libjson-c.so
+rm -f /var/run/ubus/ubus.sock
+
+exit 0

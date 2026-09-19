@@ -1,0 +1,5 @@
+#!/bin/sh
+# preinst: runs before files are unpacked.
+# Stop nginx so /usr/sbin/nginx can be overwritten (avoid "Text file busy").
+/etc/init.d/nginx stop 2>/dev/null || killall nginx 2>/dev/null || true
+exit 0

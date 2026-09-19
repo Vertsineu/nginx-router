@@ -1,0 +1,42 @@
+#!/bin/sh
+# postinst: runs after files are unpacked.
+# No `set -e`: the final -t is advisory; a config hiccup shouldn't mark the
+# package as failed to install.
+
+# 1. Inject `load_module` into the template (main context, before worker_processes).
+#    Idempotent: skip if already present. awk (not sed) so the leading tab is
+#    a real \t under BusyBox.
+TPL=/etc/nginx/uci.conf.template
+if [ -f "$TPL" ] && ! grep -qF "load_module /usr/lib/nginx/modules/ngx_http_ubus_module.so;" "$TPL"; then
+    awk '
+        $0 ~ /^worker_processes/ && !done {
+            print "\tload_module /usr/lib/nginx/modules/ngx_http_ubus_module.so;"
+            done = 1
+        }
+        { print }
+    ' "$TPL" > "$TPL.new" && mv "$TPL.new" "$TPL"
+fi
+
+# 2. Unversioned .so symlinks the dynamic ubus module's NEEDED entries want.
+[ -e /lib/libubus.so ]       || ln -s /lib/libubus.so.20210630 /lib/libubus.so
+[ -e /usr/lib/libjson-c.so ] || ln -s /usr/lib/libjson-c.so.5  /usr/lib/libjson-c.so
+
+# 3. Persist the ubus socket bridge in /etc/rc.local (idempotent append).
+#    luci.locations points the module at /var/run/ubus/ubus.sock but ubusd
+#    actually creates /var/run/ubus.sock.
+if ! grep -qF "ubus.sock -> " /etc/rc.local 2>/dev/null; then
+    cat >> /etc/rc.local <<'RCEOF'
+# nginx-ubus-module socket bridge (added by nginx-ssl 1.31.6-lua postinst)
+mkdir -p /var/run/ubus
+ln -sf /var/run/ubus.sock /var/run/ubus/ubus.sock
+RCEOF
+fi
+chmod +x /etc/rc.local 2>/dev/null
+mkdir -p /var/run/ubus
+ln -sf /var/run/ubus.sock /var/run/ubus/ubus.sock
+
+# 4. Regenerate the live conf (nginx-util reads the template), then validate.
+/usr/bin/nginx-util init_lan >/dev/null 2>&1 || true
+/usr/sbin/nginx -t -c /etc/nginx/uci.conf >/dev/null 2>&1 || true
+
+exit 0

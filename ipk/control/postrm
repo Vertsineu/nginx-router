@@ -1,0 +1,11 @@
+#!/bin/sh
+# postrm: runs after files are removed.
+# Tidy the rc.local bridge line we appended (only if we're the last nginx-ssl).
+if [ "$1" = "1" ] || [ -z "$1" ]; then
+    if [ -f /etc/rc.local ]; then
+        sed -i '\#nginx-ubus-module socket bridge#d' /etc/rc.local
+        sed -i '\#mkdir -p /var/run/ubus#d' /etc/rc.local
+        sed -i '\#ln -sf /var/run/ubus.sock /var/run/ubus/ubus.sock#d' /etc/rc.local
+    fi
+fi
+exit 0

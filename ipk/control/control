@@ -1,0 +1,18 @@
+Package: nginx-ssl
+Version: 1.31.6-lua
+Architecture: aarch64_cortex-a53
+Maintainer: Vertsineu <vertsineu@gmail.com>
+Source: https://github.com/Vertsineu/nginx-router
+Depends: libc, nginx-ssl-util, libubus20210630, libubox20210516, libblobmsg-json20210516, libjson-c5, libpthread
+Conflicts: nginx-all-module
+Installed-Size: 9800
+Description: nginx 1.31.6 (aarch64/musl) with OpenResty Lua + OpenWrt ubus
+ Cross-compiled replacement for the stock OpenWrt nginx-ssl 1.19.6.
+  * pcre2 / openssl / zlib / LuaJIT are statically linked in (NEEDED: libc.so
+    only), so the binary is self-contained.
+  * OpenWrt `ubus` (ubus_interpreter) is a dynamic module linked against the
+    router's libubus/libubox/libblobmsg-json/libjson-c.
+  * lua-resty-core + lua-resty-lrucache are bundled under
+    /usr/local/share/lua/5.1 (LuaJIT's default package path).
+  * `load_module` for the ubus module is injected into
+    /etc/nginx/uci.conf.template by postinst (main context).
