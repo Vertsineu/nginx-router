@@ -242,7 +242,13 @@ PY
 # BUILDMODE=static -> a single libluajit-5.1.a we link into nginx.
 # ============================================================================
 echo ">> [6b/8] static LuaJIT"
-LUAJIT_PREFIX="$BUILD_ROOT/luajit"
+# LuaJIT's Makefile derives the baked-in default LUA_ROOT from PREFIX
+# (src/Makefile: `ifneq (/usr/local,$(PREFIX)) TARGET_XCFLAGS+= -DLUA_ROOT=\"$(PREFIX)\"`).
+# PREFIX=/usr (the distro-blessed way, see luaconf.h "pass PREFIX=/usr") bakes the
+# default require() search path to /usr/share/lua/5.1 (lua) and /usr/lib/lua/5.1
+# (cpath) — so resty + cjson resolve with NO lua_package_path directive.
+# Artifacts install to /usr (lib + include/luajit-2.1) inside the build container.
+LUAJIT_PREFIX="/usr"
 (
   cd "$SRC/luajit/src"
   make clean >/dev/null 2>&1 || true
@@ -257,7 +263,7 @@ LUAJIT_PREFIX="$BUILD_ROOT/luajit"
 LUAJIT_LIB="$LUAJIT_PREFIX/lib"
 LUAJIT_INC="$LUAJIT_PREFIX/include/luajit-2.1"
 [ -f "$LUAJIT_LIB/libluajit-5.1.a" ] || { echo "   !! libluajit-5.1.a missing"; exit 1; }
-echo "   LuaJIT -> $LUAJIT_LIB/libluajit-5.1.a"
+echo "   LuaJIT -> $LUAJIT_LIB/libluajit-5.1.a (LUA_ROOT baked = $LUAJIT_PREFIX)"
 
 # ============================================================================
 # 7. Configure + build nginx (static deps, dynamic ubus module)
@@ -300,9 +306,9 @@ PFX="$BUILD_ROOT/nginx"
 "$CROSS/bin/aarch64-linux-musl-strip" -o "$OUT/ngx_http_ubus_module.so" "$SRC/nginx-$NGINX_VERSION/objs/ngx_http_ubus_module.so"
 
 # --- assemble the pure-Lua resty tree (resty.core + resty.lrucache) ---------
-# Deployed to /usr/local/share/lua/5.1/resty on the router. LuaJIT's default
-# lua_package_path already searches there, so no lua_package_path directive is
-# needed (verified on both qemu and the real router).
+# Deployed to /usr/share/lua/5.1/resty on the router. LuaJIT is compiled with
+# LUA_ROOT="/usr/", so its default lua_package_path searches /usr/share/lua/5.1/
+# and lua_package_cpath searches /usr/lib/lua/5.1/ — no extra conf needed.
 RESTY_OUT="$OUT/resty"
 rm -rf "$RESTY_OUT"; mkdir -p "$RESTY_OUT"
 cp "$SRC/resty-core/lib/resty/core.lua"       "$RESTY_OUT/"
@@ -344,8 +350,9 @@ if command -v qemu-aarch64 >/dev/null 2>&1; then
   cp "$OUT/ngx_http_ubus_module.so" "$ROOTFS/lib/nginx/modules/"
   echo "smoke page" > "$ROOTFS/www/index.html"
   # stage the pure-Lua resty tree where LuaJIT's default package path looks
-  mkdir -p "$ROOTFS/usr/local/share/lua/5.1"
-  cp -r "$OUT/resty" "$ROOTFS/usr/local/share/lua/5.1/resty"
+  # (LUA_ROOT="/usr/" -> /usr/share/lua/5.1/ + /usr/lib/lua/5.1/)
+  mkdir -p "$ROOTFS/usr/share/lua/5.1"
+  cp -r "$OUT/resty" "$ROOTFS/usr/share/lua/5.1/resty"
 
   SMOKE="$SRC/smoke"; rm -rf "$SMOKE"; mkdir -p "$SMOKE/tmp"
   cat > "$SMOKE/nginx.conf" <<EOF

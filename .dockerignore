@@ -1,0 +1,9 @@
+# Build inputs are mounted into the container at build time (-v), so they
+# don't need to be baked into the image. Excluding them keeps the image small
+# and avoids permission clashes (e.g. src/smoke/tmp owned by nobody).
+src/
+vendor/
+dist/
+.git/
+*.ipk
+*.deb

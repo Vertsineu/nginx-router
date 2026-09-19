@@ -38,7 +38,7 @@ done
 rm -rf "$STAGE"
 mkdir -p "$STAGE/data/etc/nginx" "$STAGE/data/etc/init.d" \
          "$STAGE/data/usr/sbin" "$STAGE/data/usr/lib/nginx/modules" \
-         "$STAGE/data/usr/local/share/lua/5.1" "$STAGE/control"
+         "$STAGE/data/usr/share/lua/5.1" "$STAGE/control"
 
 # --- control: the hand-written manifest + lifecycle scripts -----------------
 cp ipk/control/* "$STAGE/control/"
@@ -47,7 +47,7 @@ chmod 755 "$STAGE/control/"{preinst,postinst,prerm,postrm}
 # --- data: binaries + resty tree -------------------------------------------
 cp dist/nginx                            "$STAGE/data/usr/sbin/nginx"
 cp dist/ngx_http_ubus_module.so          "$STAGE/data/usr/lib/nginx/modules/"
-cp -r dist/resty                         "$STAGE/data/usr/local/share/lua/5.1/resty"
+cp -r dist/resty                         "$STAGE/data/usr/share/lua/5.1/resty"
 chmod 755 "$STAGE/data/usr/sbin/nginx" \
           "$STAGE/data/usr/lib/nginx/modules/ngx_http_ubus_module.so"
 
