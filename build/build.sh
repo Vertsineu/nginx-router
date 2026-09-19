@@ -39,6 +39,17 @@ mkdir -p "$SRC" "$OUT"
 # visible to every subshell. OpenSSL's `make` (not just `Configure`) needs it,
 # so an inline `PATH=… ./Configure` is not enough — export it once, up top.
 export PATH="$CROSS/bin:$PATH"
+# All dep install prefixes live under one fixed root so the OpenSSL
+# OPENSSLDIR/ENGINESDIR/MODULESDIR strings baked into nginx stay stable.
+# Default = local to this checkout; override for byte-identical builds
+# across machines:  BUILD_ROOT=/opt/nginx-build ./build/build.sh
+BUILD_ROOT="${BUILD_ROOT:-$SRC/out}"
+# Pin the OpenSSL build-info timestamp (see versions.lock). OpenSSL's
+# util/mkbuildinf.pl does gmtime($ENV{SOURCE_DATE_EPOCH} // time()) and bakes
+# that into crypto/buildinf.h, which is statically linked into nginx's .rodata.
+# Pinning it makes the final nginx byte-for-byte reproducible.
+export SOURCE_DATE_EPOCH
+echo ">> SOURCE_DATE_EPOCH=$SOURCE_DATE_EPOCH"
 
 # ============================================================================
 # 0. Fetch musl.cc aarch64 cross toolchain (fixed URL, hashed)
@@ -121,7 +132,7 @@ echo ">> [3/7] static zlib"
 (
   cd "$SRC/zlib-$ZLIB_VERSION"
   make distclean >/dev/null 2>&1 || true
-  CC="$CC" ./configure --prefix="$SRC/out/zlib" --static
+  CC="$CC" ./configure --prefix="$BUILD_ROOT/zlib" --static
   make -j"$JOBS"
   make install >/dev/null
 )
@@ -133,17 +144,17 @@ echo ">> [4/7] static pcre2"
 (
   cd "$SRC/pcre2"
   make distclean >/dev/null 2>&1 || true
-  CC="$CC" ./configure --prefix="$SRC/out/pcre2" --host=aarch64-linux-musl \
+  CC="$CC" ./configure --prefix="$BUILD_ROOT/pcre2" --host=aarch64-linux-musl \
     --disable-cpp --disable-pcre2-16 --disable-pcre2-32 --enable-pcre2-8 \
     --disable-jit --disable-unicode-properties --disable-newline-eat-semi
   make -j"$JOBS"
   make install >/dev/null
   # Force nginx to link the .a (not the .so) so NEEDED stays just libc.so
-  mkdir -p "$SRC/out/pcre2/lib/.so-bak"
-  mv "$SRC/out/pcre2/lib/"libpcre2-8.so* \
-     "$SRC/out/pcre2/lib/"libpcre2-posix.so* \
-     "$SRC/out/pcre2/lib/"*.la \
-     "$SRC/out/pcre2/lib/.so-bak/" 2>/dev/null || true
+  mkdir -p "$BUILD_ROOT/pcre2/lib/.so-bak"
+  mv "$BUILD_ROOT/pcre2/lib/"libpcre2-8.so* \
+     "$BUILD_ROOT/pcre2/lib/"libpcre2-posix.so* \
+     "$BUILD_ROOT/pcre2/lib/"*.la \
+     "$BUILD_ROOT/pcre2/lib/.so-bak/" 2>/dev/null || true
 )
 
 # ============================================================================
@@ -154,8 +165,8 @@ echo ">> [5/7] static openssl"
   cd "$SRC/openssl-$OPENSSL_VERSION"
   make distclean >/dev/null 2>&1 || ./config clean >/dev/null 2>&1 || true
   PATH="$CROSS/bin:$PATH" ./Configure linux-aarch64 \
-    --prefix="$SRC/out/openssl" \
-    --openssldir="$SRC/out/openssl/ssl" \
+    --prefix="$BUILD_ROOT/openssl" \
+    --openssldir="$BUILD_ROOT/openssl/ssl" \
     --cross-compile-prefix=aarch64-linux-musl- \
     no-shared no-async no-tests no-dso no-apps -static
   make -j"$JOBS" build_libs
@@ -231,7 +242,7 @@ PY
 # BUILDMODE=static -> a single libluajit-5.1.a we link into nginx.
 # ============================================================================
 echo ">> [6b/8] static LuaJIT"
-LUAJIT_PREFIX="$SRC/out/luajit"
+LUAJIT_PREFIX="$BUILD_ROOT/luajit"
 (
   cd "$SRC/luajit/src"
   make clean >/dev/null 2>&1 || true
@@ -252,7 +263,7 @@ echo "   LuaJIT -> $LUAJIT_LIB/libluajit-5.1.a"
 # 7. Configure + build nginx (static deps, dynamic ubus module)
 # ============================================================================
 echo ">> [7/7] nginx $NGINX_VERSION"
-PFX="$SRC/out/nginx"
+PFX="$BUILD_ROOT/nginx"
 (
   cd "$SRC/nginx-$NGINX_VERSION"
   make distclean >/dev/null 2>&1 || true
@@ -269,10 +280,10 @@ PFX="$SRC/out/nginx"
     --lock-path=/var/lock/nginx.lock \
     --http-log-path=/var/log/nginx/access.log \
     --with-cc="$CC" \
-    --with-cc-opt="-I$SRC/out/pcre2/include -I$SRC/out/openssl/include -I$SRC/out/zlib/include -I$LUAJIT_INC -L$CROSS/aarch64-linux-musl/lib \
+    --with-cc-opt="-I$BUILD_ROOT/pcre2/include -I$BUILD_ROOT/openssl/include -I$BUILD_ROOT/zlib/include -I$LUAJIT_INC -L$CROSS/aarch64-linux-musl/lib \
       -Wno-error=pointer-sign -Wno-error=sign-compare -Wno-error=return-type \
       -Wno-error=unused-variable -Wno-error=pointer-arith" \
-    --with-ld-opt="-L$SRC/out/pcre2/lib -L$SRC/out/openssl/lib -L$SRC/out/zlib/lib -L$LUAJIT_LIB \
+    --with-ld-opt="-L$BUILD_ROOT/pcre2/lib -L$BUILD_ROOT/openssl/lib -L$BUILD_ROOT/zlib/lib -L$LUAJIT_LIB \
       -L$CROSS/aarch64-linux-musl/lib -Wl,-rpath-link,$CROSS/aarch64-linux-musl/lib \
       -Wl,-Bstatic -lpcre2-8 -lssl -lcrypto -lz -lluajit-5.1 -Wl,-Bdynamic -lm" \
     --add-module="$SRC/lua-nginx-module" \

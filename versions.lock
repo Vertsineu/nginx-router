@@ -21,6 +21,13 @@ ZLIB_SHA256=bb329a0a2cd0274d05519d61c667c062e06990d72e125ee2dfa8de64f0119d16
 # musl.cc prebuilt aarch64 cross toolchain (GCC 11.2.1, musl 1.2.x).
 MUSL_TOOLCHAIN_SHA256=c909817856d6ceda86aa510894fa3527eac7989f0ef6e87b5721c58737a06c38
 
+# Fixed build timestamp. OpenSSL's util/mkbuildinf.pl does
+#   gmtime($ENV{SOURCE_DATE_EPOCH} // time())
+# and bakes that into crypto/buildinf.h, which is statically linked into
+# nginx's .rodata. Pinning it makes the final nginx byte-for-byte
+# reproducible (the only thing that otherwise varies between builds).
+SOURCE_DATE_EPOCH=1758000000   # 2025-09-16T06:40:00Z — arbitrary but FIXED
+
 # --- Git dependencies (pinned to exact commit) ---
 PCRE2_SHA=c73daa9603a8d0b64e90e4048c8c2f7f56b3a930
 NGX_UBUS_SHA=b2d7260dcb428b2fb65540edb28d7538602b4a26   # Ansuel/nginx-ubus-module
