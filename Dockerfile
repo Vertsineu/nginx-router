@@ -1,16 +1,17 @@
 # ============================================================================
 # nginx-router — reproducible cross-build of nginx 1.31.6 (aarch64/musl)
-#              + OpenWrt ubus dynamic module
+#              + OpenWrt ubus dynamic module + OpenResty Lua (LuaJIT 2.1)
 # ----------------------------------------------------------------------------
-# A *recipe* repo: it does NOT commit the 8.5MB binary. You build it with
-# docker (or a bare Debian x86_64 host) and `docker cp` the artifacts out.
+# A *recipe* repo: it does NOT commit the ~9.5MB binary. You build it with
+# docker (or a bare Debian x86_64 host) and `docker cp` the artifacts out:
 #
 #   docker build -f Dockerfile -t nginx-router .
 #   docker run --rm nginx-router              # builds into /work/dist
 #   # or pull artifacts straight out:
 #   docker run --rm --name nr nginx-router
-#   docker cp nr:/work/dist/nginx            ./nginx
-#   docker cp nr:/work/dist/ngx_http_ubus_module.so ./ngx_http_ubus_module.so
+#   docker cp nr:/work/dist/nginx             ./nginx
+#   docker cp nr:/work/dist/ngx_http_ubus_module.so ./
+#   docker cp nr:/work/dist/resty             ./resty
 #
 # Then deploy to the router with ./deploy/deploy.sh (see below).
 # ============================================================================
@@ -26,12 +27,14 @@ ENV DEBIAN_FRONTEND=noninteractive \
 #  * autoconf/automake/libtool  : pcre2 ships configure.ac (autogen.sh)
 #  * python3                    : deterministic rewrite of the ubus config
 #  * git curl ca-certificates   : fetch pinned upstreams
+#  * gcc make                   : LuaJIT's host-side buildvm (HOST_CC=gcc)
 RUN apt-get update && apt-get install -y --no-install-recommends \
         ca-certificates curl git xz-utils tar \
         autoconf automake libtool \
         binutils binutils-aarch64-linux-gnu \
         qemu-user qemu-user-static binfmt-support \
         python3 \
+        gcc make \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /work

@@ -1,10 +1,14 @@
 #!/usr/bin/env bash
 # ============================================================================
-# build.sh — cross-build nginx 1.31.6 (aarch64/musl) + OpenWrt ubus module
-# ----------------------------------------------------------------------------
+# build.sh — cross-build nginx 1.31.6 (aarch64/musl) with:
+#   * OpenWrt ubus dynamic module (ngx_http_ubus_module.so)
+#   * OpenResty Lua  (LuaJIT 2.1, statically linked + lua-nginx-module)
+#   * lua-resty-core + lua-resty-lrucache (pure Lua, deployed to the router)
+#
 # Produces (in $OUT):
-#   nginx                          (static pcre2/openssl/zlib, NEEDED: libc.so)
+#   nginx                          (static pcre2/openssl/zlib/luajit; NEEDED: libc.so)
 #   ngx_http_ubus_module.so        (dynamic, links vendor/*.so)
+#   resty/                         (lua-resty-core + lrucache tree)
 #
 # Target: an OpenWrt musl aarch64 router. Everything is pinned in
 # versions.lock so a rebuild yields the same binaries.
@@ -99,6 +103,11 @@ clone ubus-repo "https://git.openwrt.org/project/ubus.git"                "$UBUS
 clone ubox-repo "https://git.openwrt.org/project/libubox.git"             "$UBOX_SHA"
 clone jsonc   "https://github.com/json-c/json-c.git"                      "$JSONC_SHA"
 clone ngx-ubus "https://github.com/Ansuel/nginx-ubus-module.git"          "$NGX_UBUS_SHA"
+# OpenResty / Lua side
+clone lua-nginx-module "https://github.com/openresty/lua-nginx-module.git" "$NGX_LUA_SHA"
+clone luajit   "https://github.com/openresty/luajit2.git"                 "$LUAJIT_SHA"
+clone resty-core "https://github.com/openresty/lua-resty-core.git"        "$RESTY_CORE_SHA"
+clone resty-lrucache "https://github.com/openresty/lua-resty-lrucache.git" "$RESTY_LRU_CACHE_SHA"
 
 # pcre2 ships configure.ac, not configure -> autogen (needs autoconf/automake/libtool)
 if [ ! -x "$SRC/pcre2/configure" ]; then
@@ -214,6 +223,32 @@ open(p,'w').write(s)
 PY
 
 # ============================================================================
+# 6b. Cross-build STATIC LuaJIT (aarch64/musl)
+# ------------------------------------------------------------------
+# LuaJIT's Makefile has native cross-compile support:
+#   HOST_CC  = build the host-side "buildvm" (runs on the x86 build box)
+#   CROSS=   = prefix for the target CC/AR/STRIP (aarch64-linux-musl-)
+# BUILDMODE=static -> a single libluajit-5.1.a we link into nginx.
+# ============================================================================
+echo ">> [6b/8] static LuaJIT"
+LUAJIT_PREFIX="$SRC/out/luajit"
+(
+  cd "$SRC/luajit/src"
+  make clean >/dev/null 2>&1 || true
+  make BUILDMODE=static \
+       CROSS=aarch64-linux-musl- \
+       HOST_CC="gcc" \
+       PREFIX="$LUAJIT_PREFIX" \
+       -j"$JOBS"
+)
+# `make install` lays out headers (include/luajit-2.1) + lib (lib/libluajit-5.1.a)
+( cd "$SRC/luajit" && make install PREFIX="$LUAJIT_PREFIX" >/dev/null )
+LUAJIT_LIB="$LUAJIT_PREFIX/lib"
+LUAJIT_INC="$LUAJIT_PREFIX/include/luajit-2.1"
+[ -f "$LUAJIT_LIB/libluajit-5.1.a" ] || { echo "   !! libluajit-5.1.a missing"; exit 1; }
+echo "   LuaJIT -> $LUAJIT_LIB/libluajit-5.1.a"
+
+# ============================================================================
 # 7. Configure + build nginx (static deps, dynamic ubus module)
 # ============================================================================
 echo ">> [7/7] nginx $NGINX_VERSION"
@@ -221,6 +256,10 @@ PFX="$SRC/out/nginx"
 (
   cd "$SRC/nginx-$NGINX_VERSION"
   make distclean >/dev/null 2>&1 || true
+  # lua-nginx-module discovers LuaJIT via these env vars (its `config` adds
+  # -I$LUAJIT_INC -L$LUAJIT_LIB -lluajit-5.1 -lm automatically)
+  export LUAJIT_LIB="$LUAJIT_LIB"
+  export LUAJIT_INC="$LUAJIT_INC"
   ./configure \
     --prefix=/usr \
     --conf-path=/etc/nginx/nginx.conf \
@@ -230,12 +269,13 @@ PFX="$SRC/out/nginx"
     --lock-path=/var/lock/nginx.lock \
     --http-log-path=/var/log/nginx/access.log \
     --with-cc="$CC" \
-    --with-cc-opt="-I$SRC/out/pcre2/include -I$SRC/out/openssl/include -I$SRC/out/zlib/include -L$CROSS/aarch64-linux-musl/lib \
+    --with-cc-opt="-I$SRC/out/pcre2/include -I$SRC/out/openssl/include -I$SRC/out/zlib/include -I$LUAJIT_INC -L$CROSS/aarch64-linux-musl/lib \
       -Wno-error=pointer-sign -Wno-error=sign-compare -Wno-error=return-type \
       -Wno-error=unused-variable -Wno-error=pointer-arith" \
-    --with-ld-opt="-L$SRC/out/pcre2/lib -L$SRC/out/openssl/lib -L$SRC/out/zlib/lib \
+    --with-ld-opt="-L$SRC/out/pcre2/lib -L$SRC/out/openssl/lib -L$SRC/out/zlib/lib -L$LUAJIT_LIB \
       -L$CROSS/aarch64-linux-musl/lib -Wl,-rpath-link,$CROSS/aarch64-linux-musl/lib \
-      -Wl,-Bstatic -lpcre2-8 -lssl -lcrypto -lz -Wl,-Bdynamic" \
+      -Wl,-Bstatic -lpcre2-8 -lssl -lcrypto -lz -lluajit-5.1 -Wl,-Bdynamic -lm" \
+    --add-module="$SRC/lua-nginx-module" \
     --add-dynamic-module="$SRC/ngx-ubus" \
     --with-http_ssl_module --with-http_v2_module --with-http_gzip_static_module \
     --with-http_realip_module --with-http_stub_status_module --with-http_dav_module \
@@ -247,6 +287,19 @@ PFX="$SRC/out/nginx"
 # --- strip + emit final artifacts -------------------------------------------
 "$CROSS/bin/aarch64-linux-musl-strip" -o "$OUT/nginx" "$SRC/nginx-$NGINX_VERSION/objs/nginx"
 "$CROSS/bin/aarch64-linux-musl-strip" -o "$OUT/ngx_http_ubus_module.so" "$SRC/nginx-$NGINX_VERSION/objs/ngx_http_ubus_module.so"
+
+# --- assemble the pure-Lua resty tree (resty.core + resty.lrucache) ---------
+# Deployed to /usr/local/share/lua/5.1/resty on the router. LuaJIT's default
+# lua_package_path already searches there, so no lua_package_path directive is
+# needed (verified on both qemu and the real router).
+RESTY_OUT="$OUT/resty"
+rm -rf "$RESTY_OUT"; mkdir -p "$RESTY_OUT"
+cp "$SRC/resty-core/lib/resty/core.lua"       "$RESTY_OUT/"
+cp -r "$SRC/resty-core/lib/resty/core"        "$RESTY_OUT/"
+cp "$SRC/resty-lrucache/lib/resty/lrucache.lua" "$RESTY_OUT/"
+[ -d "$SRC/resty-lrucache/lib/resty/lrucache" ] && cp -r "$SRC/resty-lrucache/lib/resty/lrucache" "$RESTY_OUT/"
+find "$RESTY_OUT" -name "*.md" -delete
+echo "   resty tree -> $RESTY_OUT ($(find "$RESTY_OUT" -type f | wc -l) files)"
 
 echo
 echo ">> DONE. Artifacts in $OUT :"
@@ -279,6 +332,9 @@ if command -v qemu-aarch64 >/dev/null 2>&1; then
   ln -sf libjson-c.so.5             "$ROOTFS/lib/libjson-c.so"
   cp "$OUT/ngx_http_ubus_module.so" "$ROOTFS/lib/nginx/modules/"
   echo "smoke page" > "$ROOTFS/www/index.html"
+  # stage the pure-Lua resty tree where LuaJIT's default package path looks
+  mkdir -p "$ROOTFS/usr/local/share/lua/5.1"
+  cp -r "$OUT/resty" "$ROOTFS/usr/local/share/lua/5.1/resty"
 
   SMOKE="$SRC/smoke"; rm -rf "$SMOKE"; mkdir -p "$SMOKE/tmp"
   cat > "$SMOKE/nginx.conf" <<EOF
@@ -299,6 +355,14 @@ http {
     root /www;
     location / { try_files \$uri \$uri/ =404; }
     location /ubus { ubus_interpreter; ubus_socket_path /var/run/ubus.sock; ubus_noauth on; }
+    location /lua {
+      content_by_lua_block {
+        local ffi = require "ffi"
+        ffi.cdef[[size_t strlen(const char*);]]
+        local core = require "resty.core"
+        ngx.say("qemu-lua OK; strlen=", tostring(ffi.C.strlen("aarch64")), "; resty.core=", tostring(core ~= nil))
+      }
+    }
   }
 }
 EOF
@@ -314,15 +378,20 @@ EOF
   sleep 2
   # nginx listens on the *guest's* 127.0.0.1:8900; with qemu-user + shared net
   # namespace it is reachable on the host 127.0.0.1:8900
-  code_http= code_ubus=
+  code_http= code_ubus= body_lua=
   code_http=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:8900/ 2>/dev/null || echo 000)
   code_ubus=$(curl -s -o /dev/null -w "%{http_code}" -X POST \
      -d '{"jsonrpc":"2.0","id":1,"method":"list","params":[]}' \
      http://127.0.0.1:8900/ubus 2>/dev/null || echo 000)
+  body_lua=$(curl -s http://127.0.0.1:8900/lua 2>/dev/null || echo "")
   kill "$smoke_pid" 2>/dev/null || true
   echo "   GET  /     -> $code_http  (expect 200)"
   echo "   POST /ubus -> $code_ubus  (expect 200; no ubusd here so list may be {})"
-  [ "$code_http" = "200" ] && echo "   SMOKE OK" || echo "   SMOKE: http not 200 (check netns)"
+  echo "   GET  /lua  -> $body_lua"
+  ok="   SMOKE OK"
+  [ "$code_http" != "200" ] && ok="   SMOKE: http not 200 (check netns)"
+  echo "$body_lua" | grep -q "qemu-lua OK" || ok="   SMOKE: lua not OK"
+  echo "$ok"
 else
   echo "   (qemu-aarch64 not found — skipping runtime smoke test; -V still works)"
   "$OUT/nginx" -v 2>&1

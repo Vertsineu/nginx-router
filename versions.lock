@@ -1,8 +1,9 @@
 # versions.lock
 # ---------------------------------------------------------------------------
 # Pins EVERY upstream artifact for a reproducible cross-build of
-# nginx 1.31.6 (aarch64 / musl) + OpenWrt ubus dynamic module, targeting an
-# OpenWrt (musl) aarch64 router.
+# nginx 1.31.6 (aarch64 / musl) + OpenWrt ubus dynamic module + OpenResty
+# Lua (LuaJIT 2.1, statically linked) + lua-resty-core, targeting an OpenWrt
+# (musl) aarch64 router.
 #
 # This file is shell-sourceable: build.sh does `. versions.lock`.
 # ---------------------------------------------------------------------------
@@ -26,6 +27,19 @@ NGX_UBUS_SHA=b2d7260dcb428b2fb65540edb28d7538602b4a26   # Ansuel/nginx-ubus-modu
 UBUS_SHA=9ba1ab795b2f427ba0d9b00e27a3e0b343a8410b       # git.openwrt.org/project/ubus
 UBOX_SHA=e7608b69283d919d031d13cc8e21692503f5dbea       # git.openwrt.org/project/libubox
 JSONC_SHA=a5598711652a924684a437a838725a189fa5468a      # json-c/json-c
+LUAJIT_TAG=v2.1-20260914                                   # openresty/luajit2
+LUAJIT_SHA=ae3d1eecfdbe70b54040779f7b4655e132b9d875
+NGX_LUA_TAG=v0.10.31                                       # openresty/lua-nginx-module
+NGX_LUA_SHA=4b21d8f5fd3cc94fd25c530b3a61405af9666d0b
+RESTY_CORE_TAG=v0.1.34rc3                                  # openresty/lua-resty-core
+RESTY_CORE_SHA=6fec23e2149c88b33b39fec8a5ebdd67a3e0dd88
+RESTY_LRU_CACHE_TAG=v0.15                                  # openresty/lua-resty-lrucache
+RESTY_LRU_CACHE_SHA=3ff6300e68b73ba20e909c7d16bd839aef2e5a4b
+
+# NOTE: lua-nginx-module v0.10.31 requires a *matching* lua-resty-core. The
+# version check in resty/core/base.lua is `ngx_lua_version ~= 10031` (exact).
+# ngx_lua 0.10.31 => 10031, so resty-core v0.1.34rc3 is the lock. If you bump
+# ngx_lua, bump resty-core to the matching tag (see README "version lock").
 
 # --- Router-side .so the ubus module dlopens (vendored, ABI-locked) ---
 UBUS_LIBS="libubus.so.20210630 libubox.so.20210516 libblobmsg_json.so.20210516 libjson-c.so.5"

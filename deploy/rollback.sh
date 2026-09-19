@@ -14,6 +14,8 @@
 #   * /usr/sbin/nginx           <- backup
 #   * uci.conf.template         <- drop the load_module line (module was ours)
 #   * removes /usr/lib/nginx/modules/ngx_http_ubus_module.so
+#   * removes /etc/nginx/conf.d/lua-test.conf (our /lua-test vhost)
+#   * removes /usr/local/share/lua/5.1/resty  (lua-resty-core we shipped)
 #   * keeps the .so symlinks + rc.local (harmless, and needed if you re-deploy)
 #
 # NOTE: the stock 1.19.6 had ubus STATICALLY compiled in, so dropping the
@@ -50,6 +52,10 @@ fi
 
 # 4. remove our module (stock build has ubus compiled in)
 rm -f /usr/lib/nginx/modules/ngx_http_ubus_module.so
+
+# 4b. remove our lua-test vhost + the resty tree we shipped
+rm -f /etc/nginx/conf.d/lua-test.conf
+rm -rf /usr/local/share/lua/5.1/resty
 
 # 5. regenerate live conf + start
 /usr/bin/nginx-util init_lan >/dev/null 2>&1 || true
