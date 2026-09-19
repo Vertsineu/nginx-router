@@ -48,6 +48,32 @@ proving LuaJIT + lua-nginx-module + resty.core all run.
 Bare-metal (Debian x86_64) without docker: install the same prereqs the
 Dockerfile does, then `./build/build.sh`.
 
+## Reproducibility
+
+`versions.lock` pins every upstream (tarball SHA256 + git commit) and the
+build timestamp, so the build is deterministic **within a checkout**: two
+from-scratch builds of the same tree produce a byte-identical `nginx`
+(verified: same md5, same size). The levers that make this true:
+
+- **`SOURCE_DATE_EPOCH`** — OpenSSL's `crypto/buildinf.h` bakes
+  `built on: <time>` into the binary; pinning this env var freezes it.
+- **`BUILD_ROOT`** — all dep install prefixes (zlib/pcre2/openssl/LuaJIT)
+  live under one fixed root, so the `OPENSSLDIR`/`ENGINESDIR`/`MODULESDIR`
+  strings OpenSSL bakes into `.rodata` are stable. Defaults to `<checkout>/src/out`.
+
+**Across checkouts** (e.g. `git clone` into a different directory) the only
+byte difference is that `OPENSSLDIR` path string — the binary is still
+functionally identical (same `NEEDED`, same behavior, ubus module
+byte-identical, resty tree identical). To make *that* byte-identical too,
+build from the same directory:
+
+```sh
+BUILD_ROOT=/opt/nginx-build ./build/build.sh
+```
+
+Every artifact's `NEEDED` is stable and small: `nginx` → `libc.so` only;
+`ngx_http_ubus_module.so` → the router's 4 `.so` + `libc.so`.
+
 ## Deploy
 
 ```sh
